@@ -18,6 +18,8 @@ python3 main.py
 
 ## About this picture
 
+This final render pours a glossy ribbon of molten dark chocolate from the lava pool on the dome all the way down the cake's front, where it gathers in a puddle on the porcelain plate.
+
 One ingredient, taken seriously: dark chocolate. The picture shows a glossy
 lava cake with its centre still molten, chocolate running down onto the
 plate, truffles and shards alongside, steam rising — rendered entirely in

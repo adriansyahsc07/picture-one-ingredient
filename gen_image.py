@@ -1,232 +1,205 @@
-#!/usr/bin/env python3
-"""Render the entry picture: a glossy dark-chocolate lava cake.
+"""Paint a glossy dark-chocolate lava cake with Pillow, pixel by pixel.
 
-One ingredient hero — dark chocolate — drawn with Pillow at 2x
-supersampling: gradients, alpha layers and Gaussian blur for a rich,
-appetizing look. Saves entry.png (1024x1024) beside this file.
+The scene is built on an oversized canvas (twice the final size) and
+shrunk at the end, which smooths every curve.  Layers, back to front:
+warm backdrop, porcelain plate, the cake itself, a molten pour that
+spills over the dome, truffles, drifting steam, and a soft vignette.
 """
 
 import math
-import os
 import random
 
 from PIL import Image, ImageDraw, ImageFilter
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-S = 2  # supersampling factor
-W = 1024 * S
-
+SCALE = 2
+SIDE = 1024 * SCALE
 random.seed(20261123)
+
+# palette: deep browns, caramel glints, cream porcelain
+INK = (24, 12, 7)
+CRUST = (52, 27, 15)
+CRUST_LIGHT = (84, 46, 24)
+LAVA = (96, 50, 22)
+LAVA_HOT = (140, 78, 36)
+PORCELAIN = (232, 222, 208)
+PORCELAIN_SHADE = (196, 182, 160)
+CREAM = (250, 244, 230)
 
 
 def lerp(a, b, t):
     return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-def vgrad(size, top, bottom):
-    img = Image.new("RGB", (size, size))
-    px = img.load()
-    for y in range(size):
-        c = lerp(top, bottom, y / size)
-        for x in range(size):
-            px[x, y] = c
-    return img
+def vertical_wash(canvas, top, bottom):
+    """Fill the canvas with a top-to-bottom colour blend."""
+    pen = ImageDraw.Draw(canvas)
+    height = canvas.height
+    for row in range(height):
+        pen.line([(0, row), (canvas.width, row)], fill=lerp(top, bottom, row / height))
 
 
-def paste_glow(base, cx, cy, radius, color, peak):
-    mask = Image.new("L", base.size, 0)
-    d = ImageDraw.Draw(mask)
-    steps = 40
+def glow_spot(canvas, cx, cy, radius, colour, strength):
+    """Composite a soft radial halo centred at (cx, cy)."""
+    halo = Image.new("RGB", canvas.size, (0, 0, 0))
+    pen = ImageDraw.Draw(halo)
+    steps = 24
     for i in range(steps, 0, -1):
         r = radius * i / steps
-        d.ellipse([cx - r, cy - r, cx + r, cy + r],
-                  fill=int(peak * (1 - i / steps) ** 1.5))
-    mask = mask.filter(ImageFilter.GaussianBlur(30 * S))
-    tint = Image.new("RGB", base.size, color)
-    base.paste(Image.composite(tint, base.convert("RGB"), mask), (0, 0), mask)
+        fade = (1 - i / steps) ** 2 * strength
+        tint = tuple(int(c * fade) for c in colour)
+        pen.ellipse([cx - r, cy - r, cx + r, cy + r], fill=tint)
+    halo = halo.filter(ImageFilter.GaussianBlur(radius / 3))
+    from PIL import ImageChops
+
+    return ImageChops.add(canvas, halo)
 
 
-def soft_ellipse(layer, box, fill, blur):
-    tmp = Image.new("RGBA", layer.size, (0, 0, 0, 0))
-    ImageDraw.Draw(tmp).ellipse(box, fill=fill)
-    tmp = tmp.filter(ImageFilter.GaussianBlur(blur))
-    layer.alpha_composite(tmp)
+def plateware(pen):
+    """Porcelain plate with a rim, seen at a shallow angle."""
+    cx, cy = SIDE // 2, int(SIDE * 0.78)
+    rx, ry = int(SIDE * 0.40), int(SIDE * 0.115)
+    # drop shadow
+    pen.ellipse([cx - rx, cy - ry + 26, cx + rx, cy + ry + 26], fill=(10, 5, 3))
+    # outer body and inner well
+    pen.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=PORCELAIN_SHADE)
+    pen.ellipse(
+        [cx - rx + 26, cy - ry + 10, cx + rx - 26, cy + ry - 10], fill=PORCELAIN
+    )
+    inner_rx, inner_ry = int(rx * 0.72), int(ry * 0.66)
+    pen.ellipse(
+        [cx - inner_rx, cy - inner_ry, cx + inner_rx, cy + inner_ry],
+        fill=lerp(PORCELAIN, PORCELAIN_SHADE, 0.45),
+    )
+    # a bright arc on the rim
+    pen.arc([cx - rx + 14, cy - ry + 6, cx + rx - 14, cy + ry - 6],
+            start=140, end=320, fill=CREAM, width=7)
 
 
-def main():
-    # ---- backdrop: deep warm brown gradient + spotlight ----
-    img = vgrad(W, (46, 26, 18), (16, 9, 6)).convert("RGBA")
-    paste_glow(img, W // 2, int(W * 0.42), int(W * 0.52), (255, 176, 96), 120)
-    paste_glow(img, W // 2, int(W * 0.40), int(W * 0.30), (255, 214, 150), 90)
+def cake_body(pen):
+    """The cake: a squat cylinder with a domed, cracked top."""
+    cx = SIDE // 2
+    top_y = int(SIDE * 0.40)
+    base_y = int(SIDE * 0.76)
+    half_w = int(SIDE * 0.235)
+    dome_h = int(SIDE * 0.085)
+    # side wall with a vertical sheen gradient
+    for i in range(half_w * 2):
+        x = cx - half_w + i
+        t = i / (half_w * 2)
+        sheen = math.sin(t * math.pi) ** 1.5
+        shade = lerp(CRUST, CRUST_LIGHT, sheen * 0.75)
+        pen.line([(x, top_y + dome_h // 2), (x, base_y)], fill=shade, width=2)
+    # base ellipse to close the bottom
+    pen.ellipse([cx - half_w, base_y - dome_h // 2, cx + half_w, base_y + dome_h // 2],
+                fill=CRUST)
+    for i in range(half_w * 2):
+        x = cx - half_w + i
+        t = i / (half_w * 2)
+        sheen = math.sin(t * math.pi) ** 1.5
+        shade = lerp(CRUST, CRUST_LIGHT, sheen * 0.75)
+        pen.line([(x, top_y + dome_h // 2), (x, base_y)], fill=shade, width=2)
+    pen.ellipse([cx - half_w, base_y - dome_h // 2, cx + half_w, base_y + dome_h // 2],
+                fill=lerp(CRUST, INK, 0.35))
+    # domed top
+    pen.ellipse([cx - half_w, top_y - dome_h, cx + half_w, top_y + dome_h],
+                fill=lerp(CRUST, CRUST_LIGHT, 0.35))
+    pen.ellipse([cx - half_w + 30, top_y - dome_h + 16, cx + half_w - 30,
+                 top_y + dome_h - 16], fill=lerp(CRUST_LIGHT, LAVA, 0.25))
+    return cx, top_y, half_w, dome_h
 
-    cx, cy = W // 2, int(W * 0.60)          # cake centre
-    plate_y = int(W * 0.70)
 
-    # ---- table shadow ----
-    sh = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    soft_ellipse(sh, [cx - int(W * 0.40), plate_y - int(W * 0.05),
-                      cx + int(W * 0.40), plate_y + int(W * 0.11)],
-                 (0, 0, 0, 150), 26 * S)
-    img.alpha_composite(sh)
+def molten_pour(pen, cx, top_y, half_w, dome_h):
+    """Lava pool on the dome plus a glossy stream over the front edge."""
+    pool_rx, pool_ry = int(half_w * 0.52), int(dome_h * 0.62)
+    pen.ellipse([cx - pool_rx, top_y - pool_ry, cx + pool_rx, top_y + pool_ry],
+                fill=LAVA)
+    pen.ellipse([cx - pool_rx + 16, top_y - pool_ry + 8, cx + pool_rx - 30,
+                 top_y + pool_ry - 10], fill=LAVA_HOT)
+    # drips finding their way down the wall
+    drip_xs = [cx - 150, cx - 60, cx + 34, cx + 128]
+    drip_len = [210, 330, 268, 176]
+    for x, length in zip(drip_xs, drip_len):
+        w = 26
+        pen.rounded_rectangle([x - w // 2, top_y + 20, x + w // 2,
+                               top_y + 20 + length], radius=w // 2, fill=LAVA)
+        pen.ellipse([x - w // 2, top_y + 14 + length, x + w // 2,
+                     top_y + 30 + length], fill=LAVA)
+    # the main glossy cascade, centre front
+    w = 74
+    pen.rounded_rectangle([cx - w // 2, top_y + 16, cx + w // 2,
+                           top_y + 706], radius=34, fill=LAVA)
+    pen.rounded_rectangle([cx - w // 2 + 12, top_y + 30, cx - w // 2 + 30,
+                           top_y + 672], radius=9, fill=LAVA_HOT)
+    # puddle gathering on the plate
+    pen.ellipse([cx - 210, int(SIDE * 0.755), cx + 230, int(SIDE * 0.815)],
+                fill=LAVA)
+    pen.ellipse([cx - 150, int(SIDE * 0.762), cx + 120, int(SIDE * 0.80)],
+                fill=LAVA_HOT)
 
-    # ---- plate ----
-    pl = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    pd = ImageDraw.Draw(pl)
-    pd.ellipse([cx - int(W * 0.37), plate_y - int(W * 0.085),
-                cx + int(W * 0.37), plate_y + int(W * 0.085)],
-               fill=(232, 214, 190, 255))
-    pd.ellipse([cx - int(W * 0.315), plate_y - int(W * 0.062),
-                cx + int(W * 0.315), plate_y + int(W * 0.062)],
-               fill=(203, 178, 148, 255))
-    pd.ellipse([cx - int(W * 0.27), plate_y - int(W * 0.048),
-                cx + int(W * 0.27), plate_y + int(W * 0.048)],
-               fill=(226, 205, 175, 255))
-    img.alpha_composite(pl)
 
-    # ---- cake body: squat cylinder with a domed top ----
-    cake = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    cd = ImageDraw.Draw(cake)
-    rw, rh = int(W * 0.235), int(W * 0.165)   # half width / height
-    top_y, bot_y = cy - rh, cy + rh
-    cd.rounded_rectangle([cx - rw, top_y, cx + rw, bot_y + int(W * 0.02)],
-                         radius=int(W * 0.045), fill=(46, 24, 13, 255))
-    # soft cylindrical shading: warm glow centre-front, shade at the base
-    soft_ellipse(cake, [cx - int(rw * 0.85), top_y + int(W * 0.02),
-                        cx + int(rw * 0.45), bot_y - int(W * 0.01)],
-                 (122, 70, 36, 110), 30 * S)
-    soft_ellipse(cake, [cx - rw, bot_y - int(W * 0.055),
-                        cx + rw, bot_y + int(W * 0.03)],
-                 (12, 6, 3, 130), 16 * S)
-    cd.rounded_rectangle([cx - rw, top_y, cx + rw, bot_y + int(W * 0.02)],
-                         radius=int(W * 0.045), outline=(24, 12, 5, 255),
-                         width=3 * S)
-    cd.ellipse([cx - rw, top_y - int(W * 0.055), cx + rw, top_y + int(W * 0.075)],
-               fill=(64, 33, 17, 255))
-    cd.ellipse([cx - rw, top_y - int(W * 0.055), cx + rw, top_y + int(W * 0.075)],
-               outline=(30, 16, 8, 255), width=3 * S)
-    img.alpha_composite(cake)
+def truffle_cluster(pen):
+    """Three truffles resting on the plate, dusted and highlighted."""
+    spots = [(int(SIDE * 0.235), int(SIDE * 0.735), 56),
+             (int(SIDE * 0.775), int(SIDE * 0.72), 64),
+             (int(SIDE * 0.815), int(SIDE * 0.775), 44)]
+    for x, y, r in spots:
+        pen.ellipse([x - r, y - r // 3, x + r, y + r // 3], fill=(12, 6, 3))
+        pen.ellipse([x - r, y - r, x + r, y + r], fill=CRUST)
+        pen.ellipse([x - r + 8, y - r + 6, x + r - 10, y + r - 14],
+                    fill=lerp(CRUST, CRUST_LIGHT, 0.5))
+        pen.ellipse([x - r // 3, y - r // 2, x - r // 8, y - r // 4],
+                    fill=(235, 205, 170))
+        for _ in range(26):
+            dx = random.randint(-r + 6, r - 6)
+            dy = random.randint(-r + 6, r - 6)
+            if dx * dx + dy * dy < (r - 8) ** 2:
+                pen.point((x + dx, y + dy), fill=(30, 16, 9))
 
-    # ---- cut wedge: warm molten interior face, front-right ----
-    wedge = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    wd = ImageDraw.Draw(wedge)
-    wx, wy = cx + int(rw * 0.18), top_y + int(W * 0.045)
-    wd.polygon([(wx, wy), (cx + rw - 4 * S, wy + int(W * 0.012)),
-                (cx + rw - int(W * 0.03), bot_y - int(W * 0.01)),
-                (wx + int(W * 0.03), bot_y + int(W * 0.005))],
-               fill=(92, 50, 24, 255))
-    img.alpha_composite(wedge)
 
-    # ---- molten flow: tapered glossy pour from the wedge to a puddle ----
-    flow = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    fd = ImageDraw.Draw(flow)
-    fx = cx + int(rw * 0.52)
-    pts = []
-    for i in range(41):
-        t = i / 40
-        y = wy + int(W * 0.01) + t * (plate_y - wy - int(W * 0.005))
-        half = (0.028 + 0.05 * t ** 1.6) * W
-        wob = math.sin(t * 9.0) * W * 0.004
-        pts.append((fx + wob - half, y))
-    for i in range(40, -1, -1):
-        t = i / 40
-        y = wy + int(W * 0.01) + t * (plate_y - wy - int(W * 0.005))
-        half = (0.028 + 0.05 * t ** 1.6) * W
-        wob = math.sin(t * 9.0) * W * 0.004
-        pts.append((fx + wob + half, y))
-    fd.polygon(pts, fill=(56, 27, 12, 255))
-    fd.ellipse([fx - int(W * 0.085), plate_y - int(W * 0.016),
-                fx + int(W * 0.10), plate_y + int(W * 0.030)],
-               fill=(56, 27, 12, 255))
-    flow = flow.filter(ImageFilter.GaussianBlur(1.2 * S))
-    img.alpha_composite(flow)
-    # gloss streaks on the flow and puddle
-    gl = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    gd = ImageDraw.Draw(gl)
-    gd.line([fx - int(W * 0.016), wy + int(W * 0.03),
-             fx - int(W * 0.010), plate_y - int(W * 0.03)],
-            fill=(255, 205, 150, 150), width=5 * S)
-    gd.arc([fx - int(W * 0.07), plate_y - int(W * 0.014),
-            fx + int(W * 0.05), plate_y + int(W * 0.026)],
-           start=200, end=320, fill=(255, 220, 175, 170), width=3 * S)
-    gl = gl.filter(ImageFilter.GaussianBlur(2 * S))
-    img.alpha_composite(gl)
+def steam_curls(canvas):
+    """Translucent ribbons of steam above the warm cake."""
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    pen = ImageDraw.Draw(layer)
+    for base_x, phase in [(SIDE * 0.42, 0.0), (SIDE * 0.52, 1.7), (SIDE * 0.60, 3.1)]:
+        pts = []
+        for k in range(60):
+            t = k / 59
+            y = SIDE * 0.36 - t * SIDE * 0.20
+            x = base_x + math.sin(t * 5.2 + phase) * 26 * (0.4 + t)
+            pts.append((x, y))
+        pen.line(pts, fill=(255, 250, 240, 90), width=13)
+    layer = layer.filter(ImageFilter.GaussianBlur(9))
+    canvas.paste(Image.alpha_composite(canvas.convert("RGBA"), layer).convert("RGB"),
+                 (0, 0))
+    return canvas
 
-    # ---- drizzle arcs over the dome ----
-    dr = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    dd = ImageDraw.Draw(dr)
-    for k in range(5):
-        yy = top_y - int(W * 0.035) + k * int(W * 0.020)
-        dd.arc([cx - rw + int(W * 0.05), yy - int(W * 0.02),
-                cx + rw - int(W * 0.05), yy + int(W * 0.03)],
-               start=15, end=165, fill=(30, 15, 7, 220), width=4 * S)
-    img.alpha_composite(dr)
 
-    # ---- truffles beside the cake ----
-    spots = [(cx - int(W * 0.335), plate_y - int(W * 0.012), int(W * 0.030)),
-             (cx - int(W * 0.285), plate_y + int(W * 0.016), int(W * 0.024)),
-             (cx + int(W * 0.315), plate_y + int(W * 0.006), int(W * 0.027))]
-    tr = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    td = ImageDraw.Draw(tr)
-    for tx, ty, tr_r in spots:
-        td.ellipse([tx - tr_r, ty + tr_r // 2, tx + tr_r, ty + tr_r],
-                   fill=(0, 0, 0, 90))
-        td.ellipse([tx - tr_r, ty - tr_r, tx + tr_r, ty + tr_r],
-                   fill=(50, 26, 13, 255))
-        td.ellipse([tx - tr_r // 2, ty - tr_r // 2,
-                    tx + tr_r // 3, ty + tr_r // 4],
-                   fill=(112, 66, 34, 255))
-    img.alpha_composite(tr.filter(ImageFilter.GaussianBlur(0.8 * S)))
-    hl = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    hd = ImageDraw.Draw(hl)
-    for tx, ty, tr_r in spots:
-        hd.ellipse([tx - tr_r // 2, ty - tr_r * 3 // 4,
-                    tx - tr_r // 6, ty - tr_r // 3],
-                   fill=(255, 226, 185, 200))
-    img.alpha_composite(hl.filter(ImageFilter.GaussianBlur(2 * S)))
+def vignette(canvas):
+    """Darken the corners so the cake holds the spotlight."""
+    shade = Image.new("L", canvas.size, 0)
+    pen = ImageDraw.Draw(shade)
+    pen.ellipse([-int(SIDE * 0.18), -int(SIDE * 0.22), int(SIDE * 1.18),
+                 int(SIDE * 1.22)], fill=255)
+    shade = shade.filter(ImageFilter.GaussianBlur(SIDE // 6))
+    black = Image.new("RGB", canvas.size, (6, 3, 2))
+    return Image.composite(canvas, black, shade)
 
-    # ---- chocolate shards leaning on the cake ----
-    sh2 = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(sh2)
-    bx, by = cx - int(rw * 0.55), bot_y - int(W * 0.01)
-    sd.polygon([(bx, by), (bx - int(W * 0.016), by - int(W * 0.085)),
-                (bx + int(W * 0.020), by - int(W * 0.062))],
-               fill=(36, 18, 9, 255))
-    sd.polygon([(bx + int(W * 0.045), by), (bx + int(W * 0.038), by - int(W * 0.068)),
-                (bx + int(W * 0.070), by - int(W * 0.045))],
-               fill=(44, 23, 11, 255))
-    img.alpha_composite(sh2)
 
-    # ---- steam wisps ----
-    st = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-    std = ImageDraw.Draw(st)
-    for k, xoff in enumerate((-0.09, 0.0, 0.09)):
-        x0 = cx + int(W * xoff)
-        wave = []
-        for i in range(31):
-            t = i / 30
-            y = top_y - int(W * 0.06) - t * W * 0.17
-            x = x0 + math.sin(t * 5.2 + k * 1.7) * W * 0.018
-            wave.append((x, y))
-        std.line(wave, fill=(255, 240, 220, 90), width=7 * S)
-    st = st.filter(ImageFilter.GaussianBlur(7 * S))
-    img.alpha_composite(st)
-
-    # ---- dome gloss + vignette ----
-    soft_ellipse(img, [cx - int(W * 0.13), top_y - int(W * 0.045),
-                       cx + int(W * 0.02), top_y + int(W * 0.005)],
-                 (255, 214, 160, 70), 8 * S)
-    vig = Image.new("L", (W, W), 0)
-    vd = ImageDraw.Draw(vig)
-    vd.ellipse([-int(W * 0.22), -int(W * 0.22), int(W * 1.22), int(W * 1.22)],
-               fill=255)
-    vig = vig.filter(ImageFilter.GaussianBlur(90 * S))
-    dark = Image.new("RGBA", (W, W), (0, 0, 0, 255))
-    img = Image.composite(img, Image.blend(img, dark, 0.55), vig)
-
-    out = img.convert("RGB").resize((1024, 1024), Image.LANCZOS)
-    out.save(os.path.join(HERE, "entry.png"))
-    print("wrote entry.png", out.size)
+def render():
+    scene = Image.new("RGB", (SIDE, SIDE), INK)
+    vertical_wash(scene, (74, 44, 26), (26, 14, 8))
+    scene = glow_spot(scene, SIDE // 2, int(SIDE * 0.52), int(SIDE * 0.46),
+                      (255, 176, 96), 0.5)
+    pen = ImageDraw.Draw(scene)
+    plateware(pen)
+    cx, top_y, half_w, dome_h = cake_body(pen)
+    molten_pour(pen, cx, top_y, half_w, dome_h)
+    truffle_cluster(pen)
+    scene = steam_curls(scene)
+    scene = vignette(scene)
+    scene = scene.resize((1024, 1024), Image.LANCZOS)
+    scene.save("entry.png")
 
 
 if __name__ == "__main__":
-    main()
+    render()

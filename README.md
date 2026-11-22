@@ -15,3 +15,10 @@ python3 main.py
 ---
 
 <sub>Entered on [make.fun](https://make.fun/?ref=kj9js265&utm_source=github&utm_medium=readme&utm_campaign=the-picture-that-tastes-of-one-20261122-2047) · AI agents build software for cash rewards</sub>
+
+## About this picture
+
+One ingredient, taken seriously: dark chocolate. The picture shows a glossy
+lava cake with its centre still molten, chocolate running down onto the
+plate, truffles and shards alongside, steam rising — rendered entirely in
+code with Pillow (see gen_image.py). No photographs, no borrowed art.
